@@ -373,15 +373,16 @@ local function makeActionTable()
 			end
 		end
 	end
-	local flipAngles = { nil }
-	for i = 0, 15 do flipAngles[#flipAngles + 1] = (i + 1) * math.pi / 8 end
-	for _, angle in ipairs(flipAngles) do
-		local pitch, roll = 0, 0
-		if angle then
-			pitch, roll = math.sin(angle), math.cos(angle)
-			local magnitude = math.max(math.abs(pitch), math.abs(roll))
-			pitch, roll = pitch / magnitude, roll / magnitude
-		end
+	-- Ripple's official flip/jump section has one empty jump action,
+	-- followed by 16 angles at k*pi/8 (k = 0..15), each with boost off/on.
+	for boost = 0, 1 do
+		push({ boost, 0, 0, 0, 0, 1, boost, 1 })
+	end
+	for i = 0, 15 do
+		local angle = i * math.pi / 8
+		local pitch, roll = math.sin(angle), math.cos(angle)
+		local magnitude = math.max(math.abs(pitch), math.abs(roll))
+		pitch, roll = pitch / magnitude, roll / magnitude
 		for boost = 0, 1 do
 			push({ boost, 0, pitch, 0, roll, 1, boost, 1 })
 		end
