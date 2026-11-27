@@ -225,6 +225,7 @@ local function linear(x, layer, ctx)
 		local wi = j - 1
 		for i = 1, input do
 			sum += x[i] * w[(i - 1) * output + j]
+			if ctx and i % 32 == 0 then ctx:yieldIfNeeded() end
 		end
 		y[j] = sum
 		if ctx then ctx:yieldIfNeeded() end
@@ -402,11 +403,13 @@ function Ripple.new(options)
 		getLive = options.getLive,
 		stateOf = options.stateOf,
 		getPath = options.getPath or function() return {} end,
-		decisionEvery = options.decisionEvery or 4,
-		budget = options.budget or 0.004,
+		decisionEvery = options.decisionEvery or 8,
+		budget = options.budget or 0.0015,
+		maxJobSeconds = options.maxJobSeconds or 0.20,
 		action = { 0, 0, 0, 0, 0, 0, 0, 0 },
 		nextDecision = 0,
 		job = nil,
+		jobStarted = 0,
 		spent = 0,
 		deadline = 0,
 		queues = {},
@@ -648,7 +651,12 @@ function Ripple:forward(obs)
 	local boostTokens = {}
 	for i = 1, 34 do boostTokens[i] = mlp(row(obs.boosts, (i - 1) * 5 + 1, 5), m.processors.boosts, self) end
 	local boostMax = table.create(128, -math.huge)
-	for i = 1, 34 do for j = 1, 128 do boostMax[j] = math.max(boostMax[j], boostTokens[i][j]) end end
+	for i = 1, 34 do
+		for j = 1, 128 do
+			boostMax[j] = math.max(boostMax[j], boostTokens[i][j])
+			if j % 32 == 0 then self:yieldIfNeeded() end
+		end
+	end
 	kv[#kv + 1] = boostMax
 	mask[#mask + 1] = false
 	for _, layer in ipairs(m.layers) do q = attention(q, kv, mask, layer, self) end
@@ -656,8 +664,12 @@ function Ripple:forward(obs)
 	local logits = table.create(276, 0)
 	for action = 1, 276 do
 		local sum = 0
-		for i = 1, 128 do sum += q[i] * m.action_embeddings[(i - 1) * 276 + action] end
+		for i = 1, 128 do
+			sum += q[i] * m.action_embeddings[(i - 1) * 276 + action]
+			if i % 32 == 0 then self:yieldIfNeeded() end
+		end
 		logits[action] = sum
+		if action % 8 == 0 then self:yieldIfNeeded() end
 	end
 	if obs.main[31] > 0.5 then
 		local reordered = table.create(276)
@@ -680,21 +692,32 @@ function Ripple:step(controls)
 	local tick = live.tick or 0
 	if not self.job and tick >= self.nextDecision then
 		self.nextDecision = tick + self.decisionEvery
+		self.jobStarted = os.clock()
 		self.job = coroutine.create(function()
 			local obs = self:buildObservation(live)
 			return obs and self:forward(obs) or 1
 		end)
 	end
 	if self.job then
+		if self.jobStarted > 0 and os.clock() - self.jobStarted > self.maxJobSeconds then
+			self.job = nil
+			self.jobStarted = 0
+			self.actionIndex = nil
+			warn("[Ripple] inference timed out; keeping the game responsive")
+			self:applyAction(controls)
+			return
+		end
 		local start = os.clock()
 		self.deadline = start + self.budget
 		local ok, result = coroutine.resume(self.job)
 		self.spent += os.clock() - start
 		if not ok then
 			self.job = nil
+			self.jobStarted = 0
 			warn("[Ripple] inference failed:", result)
 		elseif coroutine.status(self.job) == "dead" then
 			self.job = nil
+			self.jobStarted = 0
 			self.actionIndex = result
 		end
 	end
@@ -937,8 +960,9 @@ local ripple = Ripple.new({
     getLive = function() return live end,
     stateOf = stateOf,
     getPath = function() return path end,
-    decisionEvery = 4,
-    budget = 0.004,
+    decisionEvery = 8,
+    budget = 0.0015,
+    maxJobSeconds = 0.20,
 })
 
 ---------------------------------------------------------------- step hooks
