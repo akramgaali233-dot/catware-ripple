@@ -128,6 +128,7 @@ local function nearBall(st, within)
 end
 
 ---------------------------------------------------------------- Ripple v1.1 external inference adapter
+local DIR = "Catware/TurboSoccer/"
 local SCRIPT_URL = "https://raw.githubusercontent.com/akramgaali233-dot/catware-ripple/main/catware_ripple_remote.lua"
 local Ripple = (function()
 -- Ripple v1.1 Luau runtime adapter for Turbo Soccer.
